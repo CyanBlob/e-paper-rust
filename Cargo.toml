@@ -1,0 +1,43 @@
+[package]
+name = "e-paper-rust"
+version = "0.1.0"
+authors = ["Andrew Thomas <andrewjamest1993@gmail.com>"]
+edition = "2018"
+resolver = "2"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+[features]
+pio = ["esp-idf-sys/pio"]
+
+[dependencies]
+libc = {version = "0.2.126", features = ["std", "extra_traits"]}
+esp-idf-sys = { version = "0.31.5", features = ["binstart"] }
+
+#dev
+epd-waveshare = {path = "../epd-waveshare"}
+#epd-waveshare = {git = "https://github.com/caemor/epd-waveshare"}
+anyhow = {version = "1", features = ["backtrace"]}
+log = "0.4"
+#url = "2"
+embedded-svc = "0.21"
+esp-idf-hal = "0.37.4"
+embedded-hal = "0.2.7"
+esp-idf-svc = "0.41.3"
+embedded-graphics = "0.7"
+display-interface = "0.4"
+display-interface-spi = "0.4"
+st7789 = "0.6"
+#ili9341 = { version = "0.5", git = "https://github.com/yuri91/ili9341-rs" }
+ssd1306 = "0.7"
+#smol = "1.2"
+
+[build-dependencies]
+libc = "0.2.126"
+embuild = "0.29"
+anyhow = "1"
