@@ -12,7 +12,7 @@ use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use epd_waveshare::{
     color::*,
     epd2in9_v2::{Display2in9, Epd2in9},
-    epd7in5_v2::{Display7in5, Epd7in5},
+    epd7in5_v3::{Display7in5, Epd7in5},
     graphics::DisplayRotation,
     prelude::*,
 };
@@ -57,13 +57,6 @@ use ssd1306;
 use ssd1306::mode::DisplayConfig;
 use st7789;
 
-#[allow(dead_code)]
-#[cfg(not(feature = "qemu"))]
-const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
-#[allow(dead_code)]
-#[cfg(not(feature = "qemu"))]
-const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
-
 #[cfg(esp32s2)]
 include!(env!("EMBUILD_GENERATED_SYMBOLS_FILE"));
 
@@ -87,14 +80,9 @@ fn main() -> Result<()> {
 
     let mut delay = delay::Ets;
 
-    delay.delay_us(2000 as u16);
-    println!("Test draw!");
-    println!("Test draw!");
-    println!("Test draw!");
-    println!("Test draw!");
-    //test_draw(ptr::null_mut());
+    delay.delay_us(200 as u16);
 
-    let name = String::from("Blink");
+    let name = String::from("Display");
 
     let mut test_int = 7;
     let mut test_handle = 0;
@@ -103,6 +91,7 @@ fn main() -> Result<()> {
     let created_task: *mut esp_idf_sys::TaskHandle_t =
         &mut test_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
 
+    // this task runs on core 0 and writes to the display
     unsafe {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(test_draw),
@@ -115,17 +104,19 @@ fn main() -> Result<()> {
         );
     }
 
-    let name_idle = String::from("NotI");
+    let name_idle = String::from("Idle");
     let mut idle_int = 9;
     let mut idle_handle = 8;
     let test_idle: *mut c_void = &mut idle_int as *mut _ as *mut c_void;
     let idle_task: *mut esp_idf_sys::TaskHandle_t =
         &mut idle_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
 
+    // this task runs on core 1 and does nothing; just idles and lets the default idle
+    // process reset the WDT
     unsafe {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(idle),
-            &(String::as_bytes(&name).as_ptr() as i8),
+            &(String::as_bytes(&name_idle).as_ptr() as i8),
             10000,
             test_idle,
             0,
@@ -134,16 +125,9 @@ fn main() -> Result<()> {
         );
     }
 
+    // "main" runs on core 1 by default. Delete the default task since we run our own task on it
     unsafe {
         esp_idf_sys::vTaskDelete(ptr::null_mut());
-    }
-
-    delay.delay_us(200 as u16);
-
-    loop {
-        unsafe {
-            esp_idf_sys::vTaskDelay(1);
-        }
     }
 
     Ok(())
@@ -154,18 +138,16 @@ pub extern "C" fn idle(_test: *mut c_void) {
     println!("IDLE RESET BEGIN");
     loop {
         unsafe {
-            unsafe {
-                esp_idf_sys::vTaskDelay(1);
-            }
-            thread::sleep(Duration::from_secs(1))
+            esp_idf_sys::vTaskDelay(1);
         }
+        thread::sleep(Duration::from_secs(1))
     }
 }
 
 fn draw_text(display: &mut Display7in5, text: &str, x: i32, y: i32) {
     let style = MonoTextStyleBuilder::new()
         .font(&embedded_graphics::mono_font::ascii::FONT_10X20)
-        .text_color(TriColor::Black)
+        .text_color(TriColor::White)
         .background_color(TriColor::Chromatic)
         .build();
 
@@ -231,25 +213,21 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
 
         println!("Display init");
 
-        unsafe {
-            //println!("EDP TEST!!!\nHEAP INTERNAL: {}", esp_get_free_internal_heap_size());
-            //println!("HEAP REMAINING: {}", esp_get_free_heap_size());
-            //println!("TASK STACK: {}", esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()));
-        }
+        /*unsafe {
+            println!("HEAP INTERNAL: {}", esp_get_free_internal_heap_size());
+            println!("HEAP REMAINING: {}", esp_get_free_heap_size());
+            println!("TASK STACK: {}", esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()));
+        }*/
 
         println!("Create epd");
-        let mut epd = Epd7in5::new(&mut spi, cs, busy, dc, rst, &mut u8_delay);
-        println!("Created epd?");
-
-        unsafe {
-            esp_idf_sys::vTaskDelay(1);
-        }
+        let epd = Epd7in5::new(&mut spi, cs, busy, dc, rst, &mut u8_delay);
+        println!("Created epd");
 
         match epd {
             Ok(_) => {
                 println!("Got epd");
             }
-            Err(e) => {
+            Err(_) => {
                 print!("Failed to get epd :(");
                 return;
             }
@@ -264,21 +242,57 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
             esp_idf_sys::vTaskDelay(1);
         }
 
-        println!("White clear");
-        display.clear_buffer(TriColor::Black);
-        display.clear_buffer(TriColor::White);
-        display.clear_buffer(TriColor::Chromatic);
-        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
-        epd.display_frame(&mut spi, &mut u8_delay);
+            println!("White clear");
+            display.clear_buffer(TriColor::White);
+            // manual buffer update for testing
+            /*display.get_mut_buffer();
+            for elem in display.get_mut_buffer().iter_mut() {
+                *elem = 0xFF;
+            }
+            println!("Updated {} bytes", display.buffer().len());*/
+            epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+            epd.display_frame(&mut spi, &mut u8_delay);
 
-        unsafe {
-            esp_idf_sys::vTaskDelay(3000);
-        }
+            unsafe {
+                esp_idf_sys::vTaskDelay(1000);
+            }
+
+            println!("Black clear");
+            display.clear_buffer(TriColor::Black);
+            /*display.get_mut_buffer();
+            for elem in display.get_mut_buffer().iter_mut() {
+                *elem = 0x00;
+            }*/
+            epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+            epd.display_frame(&mut spi, &mut u8_delay);
+
+            unsafe {
+                esp_idf_sys::vTaskDelay(1000);
+            }
+
+            /*println!("Red clear");
+            display.clear_buffer(TriColor::Chromatic);
+            epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+            epd.display_frame(&mut spi, &mut u8_delay);*/
+
+            unsafe {
+                esp_idf_sys::vTaskDelay(1000);
+            }
 
         draw_text(&mut display, "Hello, world", 00, 20);
         draw_text(&mut display, "from Rust running on", 0, 40);
-        draw_text(&mut display, "my ESP32 connected to a 7in5 V3 WaveShare display", 0, 60);
-        draw_text(&mut display, "This is mostly working, but the colors are wrong", 0, 80);
+        draw_text(
+            &mut display,
+            "my ESP32 connected to a 7in5 V3 WaveShare display",
+            0,
+            60,
+        );
+        draw_text(
+            &mut display,
+            "This is mostly working, but the colors are wrong",
+            0,
+            80,
+        );
 
         unsafe {
             esp_idf_sys::vTaskDelay(1);
@@ -286,38 +300,14 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
 
         // Transfer the frame data to the epd and display it
         epd.update_color_frame(&mut spi, &display.bw_buffer(), &display.chromatic_buffer());
-        match epd.display_frame(&mut spi, &mut u8_delay){
+        match epd.display_frame(&mut spi, &mut u8_delay) {
             Ok(_) => println!("Update frame ok"),
             Err(_) => println!("Update frame fail"),
         }
-        unsafe {
-            esp_idf_sys::vTaskDelay(1);
-        }
-        /*match epd.display_frame(&mut spi, &mut u8_delay) {
-            Ok(_) => println!("Display frame ok"),
-            Err(_) => println!("Display frame fail"),
-        }*/
-        unsafe {
-            esp_idf_sys::vTaskDelay(1);
-        }
-        /*match epd.update_and_display_frame(&mut spi, &display.buffer(), &mut u8_delay) {
-            Ok(_) => println!("Update and display frame ok"),
-            Err(_) => println!("Update and display frame fail"),
-        }*/
-        unsafe {
-            esp_idf_sys::vTaskDelay(1);
-        }
         println!("Tried to display");
-        //thread::sleep(Duration::from_secs(1))
         unsafe {
             esp_idf_sys::vTaskDelay(10000);
         }
-
-        /*display.clear_buffer(Color::Black);
-        match epd.update_and_display_frame(&mut spi, &display.buffer(), &mut u8_delay) {
-            Ok(_) => println!("Update and display frame ok"),
-            Err(_) => println!("Update and display frame fail"),
-        }*/
     }
 }
 
@@ -327,10 +317,7 @@ struct U8Delay {
 
 impl embedded_hal::blocking::delay::DelayMs<u8> for U8Delay {
     fn delay_ms(&mut self, ms: u8) {
-        unsafe {
-            //delay((ms as u32 * 1000));
-            let mut delay = delay::Ets;
-            delay.delay_us(ms as u32 * 10);
-        }
+        let mut delay = delay::Ets;
+        delay.delay_us(ms as u32 * 10);
     }
 }
