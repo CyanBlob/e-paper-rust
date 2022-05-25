@@ -60,11 +60,11 @@ use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::*;
 use esp_idf_svc::wifi::*;
 
+use display_interface_spi::SPIInterfaceNoCS;
 use esp_idf_hal::adc;
 use esp_idf_hal::prelude::*;
 use esp_idf_sys::{self, c_types};
 use esp_idf_sys::{esp, EspError};
-use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_graphics::mono_font::{ascii::FONT_10X20, MonoTextStyle};
 use embedded_graphics::pixelcolor::*;
@@ -145,7 +145,7 @@ fn main() -> Result<()> {
     // this task runs on core 1 and starts a wifi access point
     unsafe {
         esp_idf_sys::xTaskCreatePinnedToCore(
-            Some(idle),
+            Some(start_wifi),
             &(String::as_bytes(&name_task2).as_ptr() as i8),
             10000,
             test_idle,
@@ -154,7 +154,7 @@ fn main() -> Result<()> {
             1,
         );
     }
-    
+
     // "main" runs on core 1 by default. Delete the default task since we run our own task on it
     unsafe {
         esp_idf_sys::vTaskDelete(ptr::null_mut());
@@ -173,19 +173,15 @@ pub extern "C" fn start_wifi(_test: *mut c_void) {
     let sys_loop_stack = Arc::new(EspSysLoopStack::new().unwrap());
     #[allow(unused)]
     let default_nvs = Arc::new(EspDefaultNvs::new().unwrap());
-    
+
     let netif_stack_arc = netif_stack.clone();
     let sys_loop_stack_arc = sys_loop_stack.clone();
     let default_nvs_arc = default_nvs.clone();
-    
+
     #[allow(clippy::redundant_clone)]
     #[cfg(not(feature = "qemu"))]
     #[allow(unused_mut)]
-    let mut wifi = wifi(
-        netif_stack_arc,
-        sys_loop_stack_arc,
-        default_nvs_arc,
-    );
+    let mut wifi = wifi(netif_stack_arc, sys_loop_stack_arc, default_nvs_arc);
     loop {
         unsafe {
             esp_idf_sys::vTaskDelay(1);
@@ -262,11 +258,17 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
 
         println!("Display init");
 
-        unsafe {
-            println!("DISPLAY HEAP INTERNAL: {}", esp_get_free_internal_heap_size());
+        /*unsafe {
+            println!(
+                "DISPLAY HEAP INTERNAL: {}",
+                esp_get_free_internal_heap_size()
+            );
             println!("DISPLAY HEAP REMAINING: {}", esp_get_free_heap_size());
-            println!("DISPLAY TASK STACK: {}", esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()));
-        }
+            println!(
+                "DISPLAY TASK STACK: {}",
+                esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut())
+            );
+        }*/
 
         println!("Create epd");
         let epd = Epd7in5::new(&mut spi, cs, busy, dc, rst, &mut u8_delay);
@@ -371,8 +373,11 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
             Err(_) => println!("Update frame fail"),
         }
         println!("Tried to display");
-        unsafe {
-            esp_idf_sys::vTaskDelay(10000);
+
+        while true {
+            unsafe {
+                esp_idf_sys::vTaskDelay(10000);
+            }
         }
     }
 }
