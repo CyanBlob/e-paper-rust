@@ -18,15 +18,23 @@ use epd_waveshare::{
 };
 
 use anyhow::bail;
+use embedded_svc::mqtt::client::utils::ConnState;
 use log::*;
 
+use embedded_hal::adc::OneShot;
+use embedded_hal::blocking::delay::DelayMs;
+use embedded_hal::digital::v2::OutputPin;
 use embedded_svc::eth;
-use embedded_svc::eth::Eth;
+use embedded_svc::eth::{Eth, TransitionalState};
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
 use embedded_svc::io;
 use embedded_svc::ipv4;
+use embedded_svc::mqtt::client::{Client, Connection, MessageImpl, Publish, QoS};
 use embedded_svc::ping::Ping;
+use embedded_svc::sys_time::SystemTime;
+use embedded_svc::timer::TimerService;
+use embedded_svc::timer::*;
 use embedded_svc::wifi::*;
 
 use esp_idf_hal::delay;
@@ -37,9 +45,25 @@ use esp_idf_hal::spi;
 use esp_idf_hal::spi::config::Config;
 use esp_idf_hal::spi::*;
 
-use esp_idf_sys;
-use esp_idf_sys::esp;
+use esp_idf_svc::eth::*;
+use esp_idf_svc::eventloop::*;
+use esp_idf_svc::eventloop::*;
+use esp_idf_svc::httpd as idf;
+use esp_idf_svc::httpd::ServerRegistry;
+use esp_idf_svc::mqtt::client::*;
+use esp_idf_svc::netif::*;
+use esp_idf_svc::nvs::*;
+use esp_idf_svc::ping;
+use esp_idf_svc::sntp;
+use esp_idf_svc::sysloop::*;
+use esp_idf_svc::systime::EspSystemTime;
+use esp_idf_svc::timer::*;
+use esp_idf_svc::wifi::*;
 
+use esp_idf_hal::adc;
+use esp_idf_hal::prelude::*;
+use esp_idf_sys::{self, c_types};
+use esp_idf_sys::{esp, EspError};
 use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_graphics::mono_font::{ascii::FONT_10X20, MonoTextStyle};
@@ -56,6 +80,13 @@ use embedded_hal::spi::*;
 use ssd1306;
 use ssd1306::mode::DisplayConfig;
 use st7789;
+
+#[allow(dead_code)]
+#[cfg(not(feature = "qemu"))]
+const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
+#[allow(dead_code)]
+#[cfg(not(feature = "qemu"))]
+const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
 #[cfg(esp32s2)]
 include!(env!("EMBUILD_GENERATED_SYMBOLS_FILE"));
@@ -82,7 +113,7 @@ fn main() -> Result<()> {
 
     delay.delay_us(200 as u16);
 
-    let name = String::from("Display");
+    let name_task1 = String::from("Display");
 
     let mut test_int = 7;
     let mut test_handle = 0;
@@ -95,7 +126,7 @@ fn main() -> Result<()> {
     unsafe {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(test_draw),
-            &(String::as_bytes(&name).as_ptr() as i8),
+            &(String::as_bytes(&name_task1).as_ptr() as i8),
             100000,
             test,
             0,
@@ -104,19 +135,18 @@ fn main() -> Result<()> {
         );
     }
 
-    let name_idle = String::from("Idle");
+    let name_task2 = String::from("Wifi");
     let mut idle_int = 9;
     let mut idle_handle = 8;
     let test_idle: *mut c_void = &mut idle_int as *mut _ as *mut c_void;
     let idle_task: *mut esp_idf_sys::TaskHandle_t =
         &mut idle_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
 
-    // this task runs on core 1 and does nothing; just idles and lets the default idle
-    // process reset the WDT
+    // this task runs on core 1 and starts a wifi access point
     unsafe {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(idle),
-            &(String::as_bytes(&name_idle).as_ptr() as i8),
+            &(String::as_bytes(&name_task2).as_ptr() as i8),
             10000,
             test_idle,
             0,
@@ -124,7 +154,7 @@ fn main() -> Result<()> {
             1,
         );
     }
-
+    
     // "main" runs on core 1 by default. Delete the default task since we run our own task on it
     unsafe {
         esp_idf_sys::vTaskDelete(ptr::null_mut());
@@ -134,13 +164,32 @@ fn main() -> Result<()> {
 }
 
 #[no_mangle]
-pub extern "C" fn idle(_test: *mut c_void) {
+pub extern "C" fn start_wifi(_test: *mut c_void) {
     println!("IDLE RESET BEGIN");
+    // network stuff
+    #[allow(unused)]
+    let netif_stack = Arc::new(EspNetifStack::new().unwrap());
+    #[allow(unused)]
+    let sys_loop_stack = Arc::new(EspSysLoopStack::new().unwrap());
+    #[allow(unused)]
+    let default_nvs = Arc::new(EspDefaultNvs::new().unwrap());
+    
+    let netif_stack_arc = netif_stack.clone();
+    let sys_loop_stack_arc = sys_loop_stack.clone();
+    let default_nvs_arc = default_nvs.clone();
+    
+    #[allow(clippy::redundant_clone)]
+    #[cfg(not(feature = "qemu"))]
+    #[allow(unused_mut)]
+    let mut wifi = wifi(
+        netif_stack_arc,
+        sys_loop_stack_arc,
+        default_nvs_arc,
+    );
     loop {
         unsafe {
             esp_idf_sys::vTaskDelay(1);
         }
-        thread::sleep(Duration::from_secs(1))
     }
 }
 
@@ -213,11 +262,11 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
 
         println!("Display init");
 
-        /*unsafe {
-            println!("HEAP INTERNAL: {}", esp_get_free_internal_heap_size());
-            println!("HEAP REMAINING: {}", esp_get_free_heap_size());
-            println!("TASK STACK: {}", esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()));
-        }*/
+        unsafe {
+            println!("DISPLAY HEAP INTERNAL: {}", esp_get_free_internal_heap_size());
+            println!("DISPLAY HEAP REMAINING: {}", esp_get_free_heap_size());
+            println!("DISPLAY TASK STACK: {}", esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()));
+        }
 
         println!("Create epd");
         let epd = Epd7in5::new(&mut spi, cs, busy, dc, rst, &mut u8_delay);
@@ -242,42 +291,59 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
             esp_idf_sys::vTaskDelay(1);
         }
 
-            println!("White clear");
-            display.clear_buffer(TriColor::White);
-            // manual buffer update for testing
-            /*display.get_mut_buffer();
-            for elem in display.get_mut_buffer().iter_mut() {
-                *elem = 0xFF;
+        println!("White clear");
+        display.clear_buffer(TriColor::White);
+        // manual buffer update for testing
+        /*display.get_mut_buffer();
+        for elem in display.get_mut_buffer().iter_mut() {
+            *elem = 0xFF;
+        }
+        println!("Updated {} bytes", display.buffer().len());*/
+        /*let mut i = 0;
+        for elem in display.get_mut_buffer().iter_mut() {
+            match i {
+                i if i < 24000              => *elem = 0xFF,
+                i if i < 48000              => *elem = 0x00,
+                i if i > 48000 && i < 60000 => *elem = 0xFF,
+                i if i > 72000 && i < 84000 => *elem = 0xFF,
+                _                           => *elem = 0x00
             }
-            println!("Updated {} bytes", display.buffer().len());*/
-            epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
-            epd.display_frame(&mut spi, &mut u8_delay);
+            i = i + 1;
+        }*/
+        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        epd.display_frame(&mut spi, &mut u8_delay);
 
-            unsafe {
-                esp_idf_sys::vTaskDelay(1000);
+        unsafe {
+            esp_idf_sys::vTaskDelay(1500);
+        }
+
+        println!("Black clear");
+        display.clear_buffer(TriColor::Black);
+        display.get_mut_buffer();
+
+        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        epd.display_frame(&mut spi, &mut u8_delay);
+
+        unsafe {
+            esp_idf_sys::vTaskDelay(1000);
+        }
+
+        println!("Red clear");
+        display.clear_buffer(TriColor::Chromatic);
+        /*let mut i = 0;
+        for elem in display.get_mut_buffer().iter_mut() {
+            match i {
+                i if i < 48000 => *elem = 0x00,
+                _              => *elem = 0xFF
             }
+            i = i + 1;
+        }*/
+        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        epd.display_frame(&mut spi, &mut u8_delay);
 
-            println!("Black clear");
-            display.clear_buffer(TriColor::Black);
-            /*display.get_mut_buffer();
-            for elem in display.get_mut_buffer().iter_mut() {
-                *elem = 0x00;
-            }*/
-            epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
-            epd.display_frame(&mut spi, &mut u8_delay);
-
-            unsafe {
-                esp_idf_sys::vTaskDelay(1000);
-            }
-
-            /*println!("Red clear");
-            display.clear_buffer(TriColor::Chromatic);
-            epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
-            epd.display_frame(&mut spi, &mut u8_delay);*/
-
-            unsafe {
-                esp_idf_sys::vTaskDelay(1000);
-            }
+        unsafe {
+            esp_idf_sys::vTaskDelay(1000);
+        }
 
         draw_text(&mut display, "Hello, world", 00, 20);
         draw_text(&mut display, "from Rust running on", 0, 40);
@@ -320,4 +386,88 @@ impl embedded_hal::blocking::delay::DelayMs<u8> for U8Delay {
         let mut delay = delay::Ets;
         delay.delay_us(ms as u32 * 10);
     }
+}
+
+#[cfg(not(feature = "qemu"))]
+#[allow(dead_code)]
+fn wifi(
+    netif_stack: Arc<EspNetifStack>,
+    sys_loop_stack: Arc<EspSysLoopStack>,
+    default_nvs: Arc<EspDefaultNvs>,
+) -> Result<Box<EspWifi>> {
+    let mut wifi = Box::new(EspWifi::new(netif_stack, sys_loop_stack, default_nvs)?);
+
+    info!("Wifi created, about to scan");
+
+    let ap_infos = wifi.scan()?;
+
+    let ours = ap_infos.into_iter().find(|a| a.ssid == SSID);
+
+    let channel = if let Some(ours) = ours {
+        info!(
+            "Found configured access point {} on channel {}",
+            SSID, ours.channel
+        );
+        Some(ours.channel)
+    } else {
+        info!(
+            "Configured access point {} not found during scanning, will go with unknown channel",
+            SSID
+        );
+        None
+    };
+
+    wifi.set_configuration(&Configuration::Mixed(
+        ClientConfiguration {
+            ssid: SSID.into(),
+            password: PASS.into(),
+            channel,
+            ..Default::default()
+        },
+        AccessPointConfiguration {
+            ssid: "aptest".into(),
+            channel: channel.unwrap_or(1),
+            ..Default::default()
+        },
+    ))?;
+
+    info!("Wifi configuration set, about to get status");
+
+    wifi.wait_status_with_timeout(Duration::from_secs(20), |status| !status.is_transitional())
+        .map_err(|e| anyhow::anyhow!("Unexpected Wifi status: {:?}", e))?;
+
+    println!("Got status");
+
+    let status = wifi.get_status();
+
+    if let Status(
+        ClientStatus::Started(ClientConnectionStatus::Connected(ClientIpStatus::Done(ip_settings))),
+        ApStatus::Started(ApIpStatus::Done),
+    ) = status
+    {
+        info!("Wifi connected");
+
+        ping(&ip_settings)?;
+    } else {
+        bail!("Unexpected Wifi status: {:?}", status);
+    }
+
+    Ok(wifi)
+}
+
+fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
+    info!("About to do some pings for {:?}", ip_settings);
+
+    let ping_summary =
+        ping::EspPing::default().ping(ip_settings.subnet.gateway, &Default::default())?;
+    if ping_summary.transmitted != ping_summary.received {
+        bail!(
+            "Pinging gateway {} resulted in timeouts",
+            ip_settings.subnet.gateway
+        );
+    }
+
+    info!("Pinging done");
+
+    Ok(())
 }
