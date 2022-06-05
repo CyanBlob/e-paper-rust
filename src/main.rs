@@ -81,6 +81,8 @@ use ssd1306;
 use ssd1306::mode::DisplayConfig;
 use st7789;
 
+pub mod marvin_api;
+
 #[allow(dead_code)]
 #[cfg(not(feature = "qemu"))]
 const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
@@ -109,31 +111,24 @@ fn main() -> Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
     println!("Booted!");
 
+    unsafe {
+        println!(
+            "MAIN HEAP INTERNAL: {}",
+            esp_idf_sys::esp_get_free_internal_heap_size()
+        );
+        println!(
+            "MAIN HEAP REMAINING: {}",
+            esp_idf_sys::esp_get_free_heap_size()
+        );
+        println!(
+            "MAIN TASK HIGH WATER MARK: {}",
+            esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut())
+        );
+    }
+
     let mut delay = delay::Ets;
 
     delay.delay_us(200 as u16);
-
-    let name_task1 = String::from("Display");
-
-    let mut test_int = 7;
-    let mut test_handle = 0;
-
-    let test: *mut c_void = &mut test_int as *mut _ as *mut c_void;
-    let created_task: *mut esp_idf_sys::TaskHandle_t =
-        &mut test_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
-
-    // this task runs on core 0 and writes to the display
-    unsafe {
-        esp_idf_sys::xTaskCreatePinnedToCore(
-            Some(test_draw),
-            &(String::as_bytes(&name_task1).as_ptr() as i8),
-            100000,
-            test,
-            0,
-            created_task,
-            0,
-        );
-    }
 
     let name_task2 = String::from("Wifi");
     let mut idle_int = 9;
@@ -147,7 +142,7 @@ fn main() -> Result<()> {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(start_wifi),
             &(String::as_bytes(&name_task2).as_ptr() as i8),
-            10000,
+            105000,
             test_idle,
             0,
             idle_task,
@@ -155,7 +150,28 @@ fn main() -> Result<()> {
         );
     }
 
-    // "main" runs on core 1 by default. Delete the default task since we run our own task on it
+    let name_task1 = String::from("Display");
+
+    let mut test_int = 7;
+    let mut test_handle = 0;
+
+    let test: *mut c_void = &mut test_int as *mut _ as *mut c_void;
+    let created_task: *mut esp_idf_sys::TaskHandle_t =
+        &mut test_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
+
+    // this task runs on core 0 and writes to the display
+    unsafe {
+        esp_idf_sys::xTaskCreatePinnedToCore(
+            Some(start_draw),
+            &(String::as_bytes(&name_task1).as_ptr() as i8),
+            99000,
+            test,
+            0,
+            created_task,
+            0,
+        );
+    }
+
     unsafe {
         esp_idf_sys::vTaskDelete(ptr::null_mut());
     }
@@ -164,8 +180,18 @@ fn main() -> Result<()> {
 }
 
 #[no_mangle]
+pub extern "C" fn idle(_test: *mut c_void) {
+    loop {
+        unsafe {
+            esp_idf_sys::vTaskDelay(100);
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn start_wifi(_test: *mut c_void) {
-    println!("IDLE RESET BEGIN");
+    println!("WIFI BEGIN");
+
     // network stuff
     #[allow(unused)]
     let netif_stack = Arc::new(EspNetifStack::new().unwrap());
@@ -178,13 +204,31 @@ pub extern "C" fn start_wifi(_test: *mut c_void) {
     let sys_loop_stack_arc = sys_loop_stack.clone();
     let default_nvs_arc = default_nvs.clone();
 
+    unsafe {
+        esp_idf_sys::vTaskDelay(1);
+    }
+
     #[allow(clippy::redundant_clone)]
     #[cfg(not(feature = "qemu"))]
     #[allow(unused_mut)]
     let mut wifi = wifi(netif_stack_arc, sys_loop_stack_arc, default_nvs_arc);
+
+    unsafe {
+        esp_idf_sys::vTaskDelay(1);
+    }
+
     loop {
+        println!("LOOP");
+        let res = marvin_api::simple_query(
+            "/e1vNdZKP/Zj3LKKpRUj/aoiyEA=".into(),
+            "todayItems",
+            marvin_api::QueryType::GET,
+            Option::None,
+        );
+
+        println!("LOOP RES: {:?}", res);
         unsafe {
-            esp_idf_sys::vTaskDelay(1);
+            esp_idf_sys::vTaskDelay(100);
         }
     }
 }
@@ -204,21 +248,27 @@ fn draw_text(display: &mut Display7in5, text: &str, x: i32, y: i32) {
 }
 
 #[no_mangle]
-pub extern "C" fn test_draw(_test: *mut c_void) {
+pub extern "C" fn start_draw(_test: *mut c_void) {
     let mut delay = delay::Ets;
 
-    let _peripherals = Peripherals::take();
     let peripherals;
+    {
+        let mut _peripherals = Peripherals::take();
 
-    match _peripherals {
-        Some(p) => {
-            println!("Got peripherals");
-            peripherals = p;
+        unsafe {
+            esp_idf_sys::vTaskDelay(1);
         }
-        None => {
-            print!("Failed to get peripherals :(");
-            delay.delay_us(20000 as u32);
-            return;
+
+        match _peripherals {
+            Some(p) => {
+                println!("Got peripherals");
+                peripherals = p;
+            }
+            None => {
+                print!("Failed to get peripherals :(");
+                delay.delay_us(20000 as u32);
+                return;
+            }
         }
     }
     let pins = peripherals.pins;
@@ -258,17 +308,20 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
 
         println!("Display init");
 
-        /*unsafe {
+        unsafe {
             println!(
-                "DISPLAY HEAP INTERNAL: {}",
-                esp_get_free_internal_heap_size()
+                "DRAW HEAP INTERNAL: {}",
+                esp_idf_sys::esp_get_free_internal_heap_size()
             );
-            println!("DISPLAY HEAP REMAINING: {}", esp_get_free_heap_size());
             println!(
-                "DISPLAY TASK STACK: {}",
+                "DRAW HEAP REMAINING: {}",
+                esp_idf_sys::esp_get_free_heap_size()
+            );
+            println!(
+                "DRAW TASK HIGH WATER MARK: {}",
                 esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut())
             );
-        }*/
+        }
 
         println!("Create epd");
         let epd = Epd7in5::new(&mut spi, cs, busy, dc, rst, &mut u8_delay);
@@ -374,9 +427,9 @@ pub extern "C" fn test_draw(_test: *mut c_void) {
         }
         println!("Tried to display");
 
-        while true {
+        loop {
             unsafe {
-                esp_idf_sys::vTaskDelay(10000);
+                esp_idf_sys::vTaskDelay(1);
             }
         }
     }
@@ -445,17 +498,19 @@ fn wifi(
 
     let status = wifi.get_status();
 
-    if let Status(
+    println!("Wifi status: {:?}", status);
+
+    /*if let Status(
         ClientStatus::Started(ClientConnectionStatus::Connected(ClientIpStatus::Done(ip_settings))),
         ApStatus::Started(ApIpStatus::Done),
     ) = status
     {
         info!("Wifi connected");
 
-        ping(&ip_settings)?;
+        //ping(&ip_settings)?;
     } else {
         bail!("Unexpected Wifi status: {:?}", status);
-    }
+    }*/
 
     Ok(wifi)
 }

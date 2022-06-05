@@ -1,4 +1,6 @@
 /.vscode
 /.embuild
+/.embuild*
 /target
 /Cargo.lock
+tags
