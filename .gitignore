@@ -4,3 +4,4 @@
 /target
 /Cargo.lock
 tags
+make_flash_monitor.sh

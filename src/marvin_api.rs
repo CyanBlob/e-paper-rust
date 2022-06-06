@@ -23,8 +23,6 @@ use esp_idf_sys::{self, c_types};
 use esp_idf_sys::{esp, EspError};
 use log::*;
 
-//#[cfg(not(test))]
-
 pub enum QueryType {
     GET,
     POST,
@@ -102,8 +100,8 @@ pub fn simple_query(
     use esp_idf_svc::http::client::*;
     use esp_idf_sys::c_types;
 
-    //let url: String = format!("{}/{}", "https://serv.amazingmarvin.com/api", endpoint);
-    let url: String  = String::from("http://google.com");
+    let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", endpoint);
+    //let url: String  = String::from("http://google.com");
 
     println!("About to fetch content from {}", url);
     let mut client = EspHttpClient::new(&EspHttpClientConfiguration {
@@ -113,21 +111,24 @@ pub fn simple_query(
 
     println!("Created client!");
 
-    print_memory();
+    let mut request: esp_idf_svc::http::client::EspHttpRequest = client.get(&url)?;
+    request.set_header("X-Full-Access-Token", token);
 
-    let response = client.get(&url)?.submit()?;
+    let response = request.submit()?;
+
+    print_memory();
 
     println!("Sent request");
 
-    let body: Result<Vec<u8>, _> = Bytes::<_, 64>::new(response.reader()).take(3084).collect();
+    let body: Result<Vec<u8>, _> = Bytes::<_, 64>::new(response.reader()).collect(); //.take(3084).collect();
 
     println!("Parsed body");
 
     let body = body?;
 
     println!(
-        "Body (truncated to 3K):\n{:?}", body
-        //String::from_utf8_lossy(&body).into_owned()
+        "Body (truncated to 3K):\n{:?}",
+        String::from_utf8_lossy(&body).into_owned()
     );
 
     print_memory();

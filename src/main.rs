@@ -90,6 +90,9 @@ const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
 #[cfg(not(feature = "qemu"))]
 const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
+const FULL_API_KEY: &str = env!("MARVIN_FULL_API_KEY");
+
+
 #[cfg(esp32s2)]
 include!(env!("EMBUILD_GENERATED_SYMBOLS_FILE"));
 
@@ -142,7 +145,7 @@ fn main() -> Result<()> {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(start_wifi),
             &(String::as_bytes(&name_task2).as_ptr() as i8),
-            105000,
+            80000,
             test_idle,
             0,
             idle_task,
@@ -164,7 +167,7 @@ fn main() -> Result<()> {
         esp_idf_sys::xTaskCreatePinnedToCore(
             Some(start_draw),
             &(String::as_bytes(&name_task1).as_ptr() as i8),
-            99000,
+            50000,
             test,
             0,
             created_task,
@@ -220,7 +223,7 @@ pub extern "C" fn start_wifi(_test: *mut c_void) {
     loop {
         println!("LOOP");
         let res = marvin_api::simple_query(
-            "/e1vNdZKP/Zj3LKKpRUj/aoiyEA=".into(),
+            FULL_API_KEY,
             "todayItems",
             marvin_api::QueryType::GET,
             Option::None,
@@ -228,7 +231,7 @@ pub extern "C" fn start_wifi(_test: *mut c_void) {
 
         println!("LOOP RES: {:?}", res);
         unsafe {
-            esp_idf_sys::vTaskDelay(100);
+            esp_idf_sys::vTaskDelay(500);
         }
     }
 }
@@ -347,7 +350,7 @@ pub extern "C" fn start_draw(_test: *mut c_void) {
         }
 
         println!("White clear");
-        display.clear_buffer(TriColor::White);
+        display.clear_bw_buffer(TriColor::White);
         // manual buffer update for testing
         /*display.get_mut_buffer();
         for elem in display.get_mut_buffer().iter_mut() {
@@ -365,7 +368,12 @@ pub extern "C" fn start_draw(_test: *mut c_void) {
             }
             i = i + 1;
         }*/
-        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        //epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        epd.update_achromatic_frame(&mut spi, display.bw_buffer());
+
+        display.clear_chromatic_buffer(TriColor::White);
+        epd.update_chromatic_frame(&mut spi, display.bw_buffer());
+
         epd.display_frame(&mut spi, &mut u8_delay);
 
         unsafe {
@@ -376,7 +384,8 @@ pub extern "C" fn start_draw(_test: *mut c_void) {
         display.clear_buffer(TriColor::Black);
         display.get_mut_buffer();
 
-        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        // r/w frame already empty
+        epd.update_achromatic_frame(&mut spi, display.bw_buffer());
         epd.display_frame(&mut spi, &mut u8_delay);
 
         unsafe {
@@ -384,7 +393,9 @@ pub extern "C" fn start_draw(_test: *mut c_void) {
         }
 
         println!("Red clear");
-        display.clear_buffer(TriColor::Chromatic);
+        // set b/w frame to white. NOTE: not needed; red is highest priority
+        //display.clear_buffer(TriColor::White);
+        //epd.update_achromatic_frame(&mut spi, display.bw_buffer());
         /*let mut i = 0;
         for elem in display.get_mut_buffer().iter_mut() {
             match i {
@@ -393,7 +404,8 @@ pub extern "C" fn start_draw(_test: *mut c_void) {
             }
             i = i + 1;
         }*/
-        epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+        display.clear_buffer(TriColor::Chromatic);
+        epd.update_chromatic_frame(&mut spi, display.chromatic_buffer());
         epd.display_frame(&mut spi, &mut u8_delay);
 
         unsafe {
