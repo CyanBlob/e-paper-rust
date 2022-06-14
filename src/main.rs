@@ -135,7 +135,8 @@ fn main() -> Result<()> {
 
     let mut tasks_arc = Box::new(Mutex::new(Vec::<marvin_api::Task>::new()));
 
-    let tasks_ptr: *mut c_void = &mut tasks_arc as *mut _ as *mut c_void;
+    //let tasks_ptr: *mut c_void = &mut tasks_arc as *mut _ as *mut c_void;
+    let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
 
     let name_task2 = String::from("Wifi");
     let mut idle_int = 9;
@@ -159,7 +160,8 @@ fn main() -> Result<()> {
 
     //let tasks_ptr: *mut c_void = &mut tasks_arc as *mut _ as *mut c_void;
     //let tasks_ptr: *mut c_void = &mut *tasks_arc.into();
-    let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
+    //let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
+
     let name_task1 = String::from("Display");
 
     let mut test_int = 7;
@@ -274,7 +276,7 @@ pub extern "C" fn start_wifi(tasks_ptr: *mut c_void) {
         }
 
         unsafe {
-            esp_idf_sys::vTaskDelay(500);
+            esp_idf_sys::vTaskDelay(1000);
         }
     }
 }
