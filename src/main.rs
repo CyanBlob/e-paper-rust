@@ -135,7 +135,6 @@ fn main() -> Result<()> {
 
     let mut tasks_arc = Box::new(Mutex::new(Vec::<marvin_api::Task>::new()));
 
-    //let tasks_ptr: *mut c_void = &mut tasks_arc as *mut _ as *mut c_void;
     let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
 
     let name_task2 = String::from("Wifi");
@@ -157,10 +156,6 @@ fn main() -> Result<()> {
             1,
         );
     }
-
-    //let tasks_ptr: *mut c_void = &mut tasks_arc as *mut _ as *mut c_void;
-    //let tasks_ptr: *mut c_void = &mut *tasks_arc.into();
-    //let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
 
     let name_task1 = String::from("Display");
 
@@ -209,8 +204,6 @@ pub extern "C" fn idle(_test: *mut c_void) {
 pub extern "C" fn start_wifi(tasks_ptr: *mut c_void) {
     println!("WIFI BEGIN");
 
-    //let tasks_arc: &mut Box<Mutex<Vec<marvin_api::Task>>> =
-    //unsafe { &mut *(tasks_ptr as *mut Box<Mutex<Vec<marvin_api::Task>>>) };
     let tasks_arc: Box<Mutex<Vec<marvin_api::Task>>> =
         unsafe { Box::from_raw(tasks_ptr as *mut Mutex<Vec<marvin_api::Task>>) };
 
@@ -249,16 +242,12 @@ pub extern "C" fn start_wifi(tasks_ptr: *mut c_void) {
         );
 
         println!("ACCESSING TASKS");
-        println!("TASK PTR: {:?}", tasks_ptr);
+        println!("WIFI TASK PTR: {:?}", tasks_ptr);
         {
-            println!("CLONE");
-            //let mut tasks = tasks_arc.clone();
             println!("LOCK");
             let mut tasks = tasks_arc.lock();
             println!("UNWRAP");
             let mut tasks = tasks.unwrap();
-            println!("TO VEC");
-            let mut tasks = tasks.to_vec();
 
             println!("CLEARING TASKS");
             tasks.clear();
@@ -297,11 +286,6 @@ fn draw_text(display: &mut Display7in5, text: &str, x: i32, y: i32) {
 
 #[no_mangle]
 pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
-    //let tasks_arc: &mut Box<Mutex<Vec<marvin_api::Task>>> =
-    //unsafe { &mut *(tasks_ptr as *mut Box<Mutex<Vec<marvin_api::Task>>>) };
-    //unsafe {
-    //let tasks_arc: &mut Box<Mutex<Vec<marvin_api::Task>>> = Box::from_raw(tasks_ptr);
-    //}
     let tasks_arc: Box<Mutex<Vec<marvin_api::Task>>> =
         unsafe { Box::from_raw(tasks_ptr as *mut Mutex<Vec<marvin_api::Task>>) };
 
@@ -404,11 +388,17 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
 
         loop {
             loop {
-                let mut tasks: Vec<marvin_api::Task> = tasks_arc.lock().unwrap().to_vec();
-                println!("Draw task sees the following tasks: ");
+                {
+                    let mut tasks = tasks_arc.lock().unwrap();
+                    println!("DRAW TASK PTR: {:?}", tasks_ptr);
+                    println!(
+                        "Draw task sees the following tasks ({} total): ",
+                        tasks.len()
+                    );
 
-                for task in tasks.iter() {
-                    println!("{}", &task.title.as_ref().unwrap());
+                    for task in tasks.iter() {
+                        println!("{}", &task.title.as_ref().unwrap());
+                    }
                 }
 
                 unsafe {
