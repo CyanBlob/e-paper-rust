@@ -39,39 +39,45 @@ pub enum ApiResult {
     Tasks(Vec<Task>),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct Task {
     pub _id: String,
     pub _rev: String,
-    pub createdAt: serde_json::Number,
-    pub db: String,
-    pub title: String,
+    pub createdAt: Option<serde_json::Number>,
+    pub db: Option<String>,
+    pub title: Option<String>,
     pub _type: Option<String>,
     pub parentId: Option<String>,
-    pub rank: serde_json::Number,
-    pub masterRank: serde_json::Number,
+    pub rank: Option<serde_json::Number>,
+    pub masterRank: Option<serde_json::Number>,
     pub dueDate: Option<serde_json::Number>,
-    pub updatedAt: serde_json::Number,
+    pub updatedAt: Option<serde_json::Number>,
     pub day: Option<String>,
     pub timeEstimate: Option<serde_json::Number>,
     pub firstScheduled: Option<String>,
     pub workedOnAt: Option<serde_json::Number>,
-    pub fieldUpdates: FieldUpdates,
+    pub fieldUpdates: Option<FieldUpdates>,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct FieldUpdates {
     pub dueDate: Option<serde_json::Number>,
     pub masterRank: Option<serde_json::Number>,
-    pub updatedAt: serde_json::Number,
+    pub updatedAt: Option<serde_json::Number>,
     pub parentId: Option<serde_json::Number>,
     pub day: Option<serde_json::Number>,
-    pub rank: serde_json::Number,
+    pub rank: Option<serde_json::Number>,
     pub timeEstimate: Option<serde_json::Number>,
     pub firstScheduled: Option<serde_json::Number>,
     pub workedOnAt: Option<serde_json::Number>,
 }
+
+/*impl Task() {
+    fn new() {
+
+    }
+}*/
 
 fn print_memory() {
     unsafe {
@@ -90,7 +96,7 @@ fn print_memory() {
     }
 }
 
-pub fn simple_query(
+pub fn get_todos_for_today(
     token: &str,
     endpoint: &str,
     query_type: QueryType,
@@ -129,19 +135,36 @@ pub fn simple_query(
 
     let body_str = String::from_utf8_lossy(&body).into_owned();
 
+    println!("Body (raw):\n{:?}", body_str);
+
     let api_result: Result<Vec<Task>, serde_json::Error> = serde_json::from_str(&body_str);
 
-    let unwrapped_result = api_result.unwrap();
+    //let unwrapped_result = api_result.unwrap();
+    match api_result {
+        Ok(result) => {
+            println!("Tasks:");
 
-    //println!("Body (raw):\n{:?}", body_str);
+            for task in &result {
+                println!("{}", &task.title.as_ref().unwrap());
+            }
 
-    println!("Tasks:");
-    
-    for task in &unwrapped_result {
-        println!("{}", task.title);
+            print_memory();
+
+            Ok(result)
+        }
+        Err(_) => {
+            println!("Failed to parse API response");
+            println!("Adding fake data");
+            let mut fake_results: Vec<Task> = Vec::<Task>::new();
+            fake_results.push(Task {
+                title: Some("FAKE TASK".into()),
+                createdAt: Some(serde_json::Number::from_f64(696969.0).unwrap()),
+                ..Default::default()
+            });
+            Ok(fake_results)
+            //Err("Failed to parse API response".into())
+        }
     }
 
-    print_memory();
-
-    Ok(unwrapped_result)
+    //println!("Body (raw):\n{:?}", body_str);
 }
