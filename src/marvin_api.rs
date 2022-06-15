@@ -99,8 +99,8 @@ fn print_memory() {
 pub fn get_todos_for_today(
     token: &str,
     endpoint: &str,
-    query_type: QueryType,
-    form_args: Option<Box<[(&str, &str)]>>,
+    _query_type: QueryType,
+    _form_args: Option<Box<[(&str, &str)]>>,
     //) -> Result<ApiResult, serde_json::Error> {
 ) -> Result<Vec<Task>, Box<dyn std::error::Error>> {
     use embedded_svc::http::{self, client::*, status, Headers, Status};

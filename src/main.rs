@@ -93,6 +93,8 @@ const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
 const FULL_API_KEY: &str = env!("MARVIN_FULL_API_KEY");
 
+const TASK_SPACING: i16 = 30;
+
 #[cfg(esp32s2)]
 include!(env!("EMBUILD_GENERATED_SYMBOLS_FILE"));
 
@@ -114,33 +116,16 @@ fn main() -> Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
     println!("Booted!");
 
-    unsafe {
-        println!(
-            "MAIN HEAP INTERNAL: {}",
-            esp_idf_sys::esp_get_free_internal_heap_size()
-        );
-        println!(
-            "MAIN HEAP REMAINING: {}",
-            esp_idf_sys::esp_get_free_heap_size()
-        );
-        println!(
-            "MAIN TASK HIGH WATER MARK: {}",
-            esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut())
-        );
-    }
-
     let mut delay = delay::Ets;
 
     delay.delay_us(200 as u16);
 
-    let mut tasks_arc = Box::new(Mutex::new(Vec::<marvin_api::Task>::new()));
+    let tasks_arc = Box::new(Mutex::new(Vec::<marvin_api::Task>::new()));
 
     let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
 
     let name_task2 = String::from("Wifi");
-    let mut idle_int = 9;
     let mut idle_handle = 8;
-    let test_idle: *mut c_void = &mut idle_int as *mut _ as *mut c_void;
     let idle_task: *mut esp_idf_sys::TaskHandle_t =
         &mut idle_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
 
@@ -159,10 +144,8 @@ fn main() -> Result<()> {
 
     let name_task1 = String::from("Display");
 
-    let mut test_int = 7;
     let mut test_handle = 0;
 
-    let test: *mut c_void = &mut test_int as *mut _ as *mut c_void;
     let created_task: *mut esp_idf_sys::TaskHandle_t =
         &mut test_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
 
@@ -179,98 +162,40 @@ fn main() -> Result<()> {
         );
     }
 
-    unsafe {
-        //esp_idf_sys::vTaskDelete(ptr::null_mut());
-    }
     loop {
         unsafe {
             esp_idf_sys::vTaskDelay(100);
+            //esp_idf_sys::vTaskDelete(ptr::null_mut());
         }
     }
 
+    #[allow(unreachable_code)]
     Ok(())
-}
-
-#[no_mangle]
-pub extern "C" fn idle(_test: *mut c_void) {
-    loop {
-        unsafe {
-            esp_idf_sys::vTaskDelay(100);
-        }
-    }
 }
 
 #[no_mangle]
 pub extern "C" fn start_wifi(tasks_ptr: *mut c_void) {
     println!("WIFI BEGIN");
 
-    let tasks_arc: Box<Mutex<Vec<marvin_api::Task>>> =
+    let tasks_ptr: Box<Mutex<Vec<marvin_api::Task>>> =
         unsafe { Box::from_raw(tasks_ptr as *mut Mutex<Vec<marvin_api::Task>>) };
 
-    // network stuff
-    #[allow(unused)]
-    let netif_stack = Arc::new(EspNetifStack::new().unwrap());
-    #[allow(unused)]
-    let sys_loop_stack = Arc::new(EspSysLoopStack::new().unwrap());
-    #[allow(unused)]
-    let default_nvs = Arc::new(EspDefaultNvs::new().unwrap());
-
-    let netif_stack_arc = netif_stack.clone();
-    let sys_loop_stack_arc = sys_loop_stack.clone();
-    let default_nvs_arc = default_nvs.clone();
-
-    unsafe {
-        esp_idf_sys::vTaskDelay(1);
-    }
-
-    #[allow(clippy::redundant_clone)]
-    #[cfg(not(feature = "qemu"))]
-    #[allow(unused_mut)]
-    let mut wifi = wifi(netif_stack_arc, sys_loop_stack_arc, default_nvs_arc);
+    let _wifi = init_wifi();
 
     unsafe {
         esp_idf_sys::vTaskDelay(1);
     }
 
     loop {
-        println!("LOOP");
-        let res = marvin_api::get_todos_for_today(
-            FULL_API_KEY,
-            "todayItems",
-            marvin_api::QueryType::GET,
-            Option::None,
-        );
-
-        println!("ACCESSING TASKS");
-        println!("WIFI TASK PTR: {:?}", tasks_ptr);
-        {
-            println!("LOCK");
-            let mut tasks = tasks_arc.lock();
-            println!("UNWRAP");
-            let mut tasks = tasks.unwrap();
-
-            println!("CLEARING TASKS");
-            tasks.clear();
-
-            println!("UNWRAPPRING RES");
-            let res = res.unwrap();
-
-            println!("PUSHING TASKS");
-            for i in 0..res.len() {
-                println!("PUSHING: {}", &res[i].title.as_ref().unwrap());
-                tasks.push(res[i].clone());
-            }
-
-            println!("LOOP RES: {:?}", res);
-        }
-
+        let tasks = &*tasks_ptr;
+        update_marvin_tasks(tasks);
         unsafe {
             esp_idf_sys::vTaskDelay(1000);
         }
     }
 }
 
-fn draw_text(display: &mut Display7in5, text: &str, x: i32, y: i32) {
+fn draw_text(display: &mut Display7in5, text: &str, x: i16, y: i16) {
     let style = MonoTextStyleBuilder::new()
         .font(&embedded_graphics::mono_font::ascii::FONT_10X20)
         .text_color(TriColor::White)
@@ -279,7 +204,8 @@ fn draw_text(display: &mut Display7in5, text: &str, x: i32, y: i32) {
 
     let text_style = TextStyleBuilder::new().baseline(Baseline::Top).build();
 
-    let _ = Text::with_text_style(text, Point::new(x, y), style, text_style).draw(display);
+    let _ = Text::with_text_style(text, Point::new(x.into(), y.into()), style, text_style)
+        .draw(display);
 
     println!("Writing: {}", text);
 }
@@ -289,28 +215,7 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
     let tasks_arc: Box<Mutex<Vec<marvin_api::Task>>> =
         unsafe { Box::from_raw(tasks_ptr as *mut Mutex<Vec<marvin_api::Task>>) };
 
-    let mut delay = delay::Ets;
-
-    let peripherals;
-    {
-        let mut _peripherals = Peripherals::take();
-
-        unsafe {
-            esp_idf_sys::vTaskDelay(1);
-        }
-
-        match _peripherals {
-            Some(p) => {
-                println!("Got peripherals");
-                peripherals = p;
-            }
-            None => {
-                print!("Failed to get peripherals :(");
-                delay.delay_us(20000 as u32);
-                return;
-            }
-        }
-    }
+    let peripherals = get_peripherals().unwrap();
     let pins = peripherals.pins;
 
     unsafe {
@@ -340,6 +245,7 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
         let dc = pins.gpio16.into_output().unwrap();
         let rst = pins.gpio4.into_output().unwrap();
 
+        #[allow(unused)]
         let mut u8_delay = U8Delay { delay: delay::Ets };
 
         unsafe {
@@ -347,21 +253,6 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
         }
 
         println!("Display init");
-
-        unsafe {
-            println!(
-                "DRAW HEAP INTERNAL: {}",
-                esp_idf_sys::esp_get_free_internal_heap_size()
-            );
-            println!(
-                "DRAW HEAP REMAINING: {}",
-                esp_idf_sys::esp_get_free_heap_size()
-            );
-            println!(
-                "DRAW TASK HIGH WATER MARK: {}",
-                esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut())
-            );
-        }
 
         println!("Create epd");
         let epd = Epd7in5::new(&mut spi, cs, busy, dc, rst, &mut u8_delay);
@@ -378,134 +269,160 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
         }
         let mut epd = epd.unwrap();
 
-        let mut u8_delay = U8Delay { delay: delay::Ets };
+        #[allow(unused)]
+        let u8_delay = U8Delay { delay: delay::Ets };
 
         let mut display = Display7in5::default();
 
         unsafe {
             esp_idf_sys::vTaskDelay(1);
         }
+        print_memory();
+
+        display.set_rotation(DisplayRotation::Rotate270);
 
         loop {
             loop {
                 {
-                    let mut tasks = tasks_arc.lock().unwrap();
+                    let tasks = tasks_arc.lock().unwrap();
                     println!("DRAW TASK PTR: {:?}", tasks_ptr);
                     println!(
                         "Draw task sees the following tasks ({} total): ",
                         tasks.len()
                     );
 
-                    for task in tasks.iter() {
+                    if tasks.len() > 0 {
+                        println!("White clear");
+                        display.clear_bw_buffer(TriColor::White);
+                        epd.update_achromatic_frame(&mut spi, display.bw_buffer())
+                            .unwrap();
+                    }
+
+                    for (i, task) in tasks.iter().enumerate() {
                         println!("{}", &task.title.as_ref().unwrap());
+                        draw_text(
+                            &mut display,
+                            &task.title.as_ref().unwrap(),
+                            0,
+                            i as i16 * TASK_SPACING,
+                        );
                     }
                 }
+            }
 
+            #[allow(unreachable_code)]
+            {
                 unsafe {
                     esp_idf_sys::vTaskDelay(100);
                 }
-            }
 
-            println!("White clear");
-            display.clear_bw_buffer(TriColor::White);
-            // manual buffer update for testing
-            /*display.get_mut_buffer();
-            for elem in display.get_mut_buffer().iter_mut() {
-                *elem = 0xFF;
-            }
-            println!("Updated {} bytes", display.buffer().len());*/
-            /*let mut i = 0;
-            for elem in display.get_mut_buffer().iter_mut() {
-                match i {
-                    i if i < 24000              => *elem = 0xFF,
-                    i if i < 48000              => *elem = 0x00,
-                    i if i > 48000 && i < 60000 => *elem = 0xFF,
-                    i if i > 72000 && i < 84000 => *elem = 0xFF,
-                    _                           => *elem = 0x00
+                println!("White clear");
+                display.clear_bw_buffer(TriColor::White);
+                // manual buffer update for testing
+                /*display.get_mut_buffer();
+                for elem in display.get_mut_buffer().iter_mut() {
+                    *elem = 0xFF;
                 }
-                i = i + 1;
-            }*/
-            //epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
-            epd.update_achromatic_frame(&mut spi, display.bw_buffer());
+                println!("Updated {} bytes", display.buffer().len());*/
+                /*let mut i = 0;
+                for elem in display.get_mut_buffer().iter_mut() {
+                    match i {
+                        i if i < 24000              => *elem = 0xFF,
+                        i if i < 48000              => *elem = 0x00,
+                        i if i > 48000 && i < 60000 => *elem = 0xFF,
+                        i if i > 72000 && i < 84000 => *elem = 0xFF,
+                        _                           => *elem = 0x00
+                    }
+                    i = i + 1;
+                }*/
+                //epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+                epd.update_achromatic_frame(&mut spi, display.bw_buffer())
+                    .unwrap();
 
-            display.clear_chromatic_buffer(TriColor::White);
-            epd.update_chromatic_frame(&mut spi, display.bw_buffer());
+                display.clear_chromatic_buffer(TriColor::White);
+                epd.update_chromatic_frame(&mut spi, display.bw_buffer())
+                    .unwrap();
 
-            epd.display_frame(&mut spi, &mut u8_delay);
+                epd.display_frame(&mut spi, &mut u8_delay).unwrap();
 
-            unsafe {
-                esp_idf_sys::vTaskDelay(1500);
-            }
-
-            println!("Black clear");
-            display.clear_bw_buffer(TriColor::Black);
-            display.get_mut_buffer();
-
-            // r/w frame already empty
-            epd.update_achromatic_frame(&mut spi, display.bw_buffer());
-            epd.display_frame(&mut spi, &mut u8_delay);
-
-            unsafe {
-                esp_idf_sys::vTaskDelay(1000);
-            }
-
-            println!("Red clear");
-            // set b/w frame to white. NOTE: not needed; red is highest priority
-            //display.clear_buffer(TriColor::White);
-            //epd.update_achromatic_frame(&mut spi, display.bw_buffer());
-            /*let mut i = 0;
-            for elem in display.get_mut_buffer().iter_mut() {
-                match i {
-                    i if i < 48000 => *elem = 0x00,
-                    _              => *elem = 0xFF
+                unsafe {
+                    esp_idf_sys::vTaskDelay(1500);
                 }
-                i = i + 1;
-            }*/
-            display.clear_chromatic_buffer(TriColor::Chromatic);
-            epd.update_chromatic_frame(&mut spi, display.chromatic_buffer());
-            epd.display_frame(&mut spi, &mut u8_delay);
 
-            unsafe {
-                esp_idf_sys::vTaskDelay(1000);
+                println!("Black clear");
+                display.clear_bw_buffer(TriColor::Black);
+                display.get_mut_buffer();
+
+                // r/w frame already empty
+                epd.update_achromatic_frame(&mut spi, display.bw_buffer())
+                    .unwrap();
+                epd.display_frame(&mut spi, &mut u8_delay).unwrap();
+
+                unsafe {
+                    esp_idf_sys::vTaskDelay(1000);
+                }
+
+                println!("Red clear");
+                // set b/w frame to white. NOTE: not needed; red is highest priority
+                //display.clear_buffer(TriColor::White);
+                //epd.update_achromatic_frame(&mut spi, display.bw_buffer());
+                /*let mut i = 0;
+                for elem in display.get_mut_buffer().iter_mut() {
+                    match i {
+                        i if i < 48000 => *elem = 0x00,
+                        _              => *elem = 0xFF
+                    }
+                    i = i + 1;
+                }*/
+                display.clear_chromatic_buffer(TriColor::Chromatic);
+                epd.update_chromatic_frame(&mut spi, display.chromatic_buffer())
+                    .unwrap();
+                epd.display_frame(&mut spi, &mut u8_delay).unwrap();
+
+                unsafe {
+                    esp_idf_sys::vTaskDelay(1000);
+                }
+
+                draw_text(&mut display, "Hello, world", 00, 20);
+                draw_text(&mut display, "from Rust running on", 0, 40);
+                draw_text(
+                    &mut display,
+                    "my ESP32 connected to a 7in5 V3 WaveShare display",
+                    0,
+                    60,
+                );
+                draw_text(
+                    &mut display,
+                    "This is mostly working, but the colors are wrong",
+                    0,
+                    80,
+                );
+
+                unsafe {
+                    esp_idf_sys::vTaskDelay(1);
+                }
+
+                // Transfer the frame data to the epd and display it
+                epd.update_achromatic_frame(&mut spi, &display.bw_buffer())
+                    .unwrap();
+                match epd.display_frame(&mut spi, &mut u8_delay) {
+                    Ok(_) => println!("Update frame ok"),
+                    Err(_) => println!("Update frame fail"),
+                }
+                println!("Tried to display");
+
+                //loop {
+                unsafe {
+                    esp_idf_sys::vTaskDelay(1000);
+                }
+                //}
             }
-
-            draw_text(&mut display, "Hello, world", 00, 20);
-            draw_text(&mut display, "from Rust running on", 0, 40);
-            draw_text(
-                &mut display,
-                "my ESP32 connected to a 7in5 V3 WaveShare display",
-                0,
-                60,
-            );
-            draw_text(
-                &mut display,
-                "This is mostly working, but the colors are wrong",
-                0,
-                80,
-            );
-
-            unsafe {
-                esp_idf_sys::vTaskDelay(1);
-            }
-
-            // Transfer the frame data to the epd and display it
-            epd.update_achromatic_frame(&mut spi, &display.bw_buffer());
-            match epd.display_frame(&mut spi, &mut u8_delay) {
-                Ok(_) => println!("Update frame ok"),
-                Err(_) => println!("Update frame fail"),
-            }
-            println!("Tried to display");
-
-            //loop {
-            unsafe {
-                esp_idf_sys::vTaskDelay(1000);
-            }
-            //}
         }
     }
 }
 
 struct U8Delay {
+    #[allow(dead_code)]
     delay: delay::Ets,
 }
 
@@ -585,6 +502,7 @@ fn wifi(
     Ok(wifi)
 }
 
+#[allow(unused)]
 fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
     info!("About to do some pings for {:?}", ip_settings);
 
@@ -600,4 +518,91 @@ fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
     info!("Pinging done");
 
     Ok(())
+}
+
+fn init_wifi() -> Result<Box<EspWifi>, Error> {
+    // network stuff
+    #[allow(unused)]
+    let netif_stack = Arc::new(EspNetifStack::new().unwrap());
+    #[allow(unused)]
+    let sys_loop_stack = Arc::new(EspSysLoopStack::new().unwrap());
+    #[allow(unused)]
+    let default_nvs = Arc::new(EspDefaultNvs::new().unwrap());
+
+    let netif_stack_arc = netif_stack.clone();
+    let sys_loop_stack_arc = sys_loop_stack.clone();
+    let default_nvs_arc = default_nvs.clone();
+
+    #[allow(clippy::redundant_clone)]
+    #[cfg(not(feature = "qemu"))]
+    #[allow(unused_mut)]
+    let mut wifi = wifi(netif_stack_arc, sys_loop_stack_arc, default_nvs_arc);
+    wifi
+}
+
+fn update_marvin_tasks(tasks_arc: &Mutex<Vec<marvin_api::Task>>) {
+    println!("LOOP");
+    let res = marvin_api::get_todos_for_today(
+        FULL_API_KEY,
+        "todayItems",
+        marvin_api::QueryType::GET,
+        Option::None,
+    );
+
+    {
+        let mut tasks = tasks_arc.lock().unwrap();
+
+        tasks.clear();
+
+        let res = res.unwrap();
+
+        println!("PUSHING TASKS");
+        for i in 0..res.len() {
+            println!("PUSHING: {}", &res[i].title.as_ref().unwrap());
+            tasks.push(res[i].clone());
+        }
+
+        println!("LOOP RES: {:?}", res);
+    }
+}
+
+fn get_peripherals() -> Option<Peripherals> {
+    {
+        let mut _peripherals = Peripherals::take();
+
+        unsafe {
+            esp_idf_sys::vTaskDelay(1);
+        }
+
+        match _peripherals {
+            Some(p) => {
+                println!("Got peripherals");
+                Some(p)
+            }
+            None => {
+                print!("Failed to get peripherals :(");
+                None
+            }
+        }
+    }
+}
+
+#[allow(unused)]
+fn print_memory() {
+    unsafe {
+        println!(
+            "HEAP INTERNAL: {}",
+            esp_idf_sys::esp_get_free_internal_heap_size()
+        );
+        println!("HEAP REMAINING: {}", esp_idf_sys::esp_get_free_heap_size());
+        println!(
+            "TASK HIGH WATER MARK: {}",
+            esp_idf_sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut())
+        );
+    }
+}
+
+#[allow(unused)]
+fn print_type_of<T>(_: &T) {
+    println!("{}", std::any::type_name::<T>())
 }
