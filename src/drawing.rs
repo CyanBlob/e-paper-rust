@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use epd_waveshare::graphics::TriDisplayCompact;
 use epd_waveshare::{

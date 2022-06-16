@@ -1,27 +1,10 @@
+#![allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::http::*;
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
 
-use esp_idf_svc::eth::*;
-use esp_idf_svc::eventloop::*;
-use esp_idf_svc::eventloop::*;
-use esp_idf_svc::httpd as idf;
-use esp_idf_svc::httpd::ServerRegistry;
-use esp_idf_svc::mqtt::client::*;
-use esp_idf_svc::netif::*;
-use esp_idf_svc::nvs::*;
-use esp_idf_svc::ping;
-use esp_idf_svc::sntp;
-use esp_idf_svc::sysloop::*;
-use esp_idf_svc::systime::EspSystemTime;
-use esp_idf_svc::timer::*;
-use esp_idf_svc::wifi::*;
-
-use esp_idf_sys::{self, c_types};
-use esp_idf_sys::{esp, EspError};
-use log::*;
 
 pub enum QueryType {
     GET,
@@ -106,7 +89,6 @@ pub fn get_todos_for_today(
     use embedded_svc::http::{self, client::*, status, Headers, Status};
     use embedded_svc::io::Bytes;
     use esp_idf_svc::http::client::*;
-    use esp_idf_sys::c_types;
 
     let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", endpoint);
 

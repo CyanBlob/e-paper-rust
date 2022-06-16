@@ -1,39 +1,18 @@
-#![allow(unused_imports)]
 #![allow(clippy::single_component_path_imports)]
 
 use core::ffi::c_void;
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::sync::{Condvar, Mutex};
-use std::{cell::RefCell, env, ptr, sync::atomic::*, sync::Arc, thread, time::*};
-
-use anyhow::bail;
-use embedded_svc::mqtt::client::utils::ConnState;
-use log::*;
+use std::{cell::RefCell, env, sync::Mutex};
 
 use esp_idf_hal::delay;
-use esp_idf_hal::gpio;
-use esp_idf_hal::i2c;
-use esp_idf_hal::prelude::*;
 
-use display_interface_spi::SPIInterfaceNoCS;
-use esp_idf_hal::adc;
-use esp_idf_hal::prelude::*;
-use esp_idf_sys::{self, c_types};
-use esp_idf_sys::{esp, EspError};
+use esp_idf_sys::EspError;
+use esp_idf_sys::{self};
 
 use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
-use embedded_hal::prelude::*;
-use embedded_hal::spi::Mode;
-use embedded_hal::spi::*;
 
-use ssd1306;
-use ssd1306::mode::DisplayConfig;
-use st7789;
-
-pub mod marvin_api;
 pub mod drawing;
+pub mod marvin_api;
 pub mod wifi;
 
 use drawing::U8Delay;
