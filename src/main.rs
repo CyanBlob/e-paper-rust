@@ -120,9 +120,9 @@ fn main() -> Result<()> {
 
     delay.delay_us(200 as u16);
 
-    let tasks_arc = Box::new(Mutex::new(Vec::<marvin_api::Task>::new()));
+    let tasks_box = Box::new(Mutex::new(Vec::<marvin_api::Task>::new()));
 
-    let tasks_ptr: *mut c_void = Box::into_raw(tasks_arc) as *mut _;
+    let tasks_ptr: *mut c_void = Box::into_raw(tasks_box) as *mut _;
 
     let name_task2 = String::from("Wifi");
     let mut idle_handle = 8;
@@ -212,7 +212,7 @@ fn draw_text(display: &mut Display7in5, text: &str, x: i16, y: i16) {
 
 #[no_mangle]
 pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
-    let tasks_arc: Box<Mutex<Vec<marvin_api::Task>>> =
+    let tasks_box: Box<Mutex<Vec<marvin_api::Task>>> =
         unsafe { Box::from_raw(tasks_ptr as *mut Mutex<Vec<marvin_api::Task>>) };
 
     let peripherals = get_peripherals().unwrap();
@@ -269,9 +269,6 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
         }
         let mut epd = epd.unwrap();
 
-        #[allow(unused)]
-        let u8_delay = U8Delay { delay: delay::Ets };
-
         let mut display = Display7in5::default();
 
         unsafe {
@@ -279,144 +276,165 @@ pub extern "C" fn start_draw(tasks_ptr: *mut c_void) {
         }
         print_memory();
 
-        display.set_rotation(DisplayRotation::Rotate270);
+        do_draw(&mut epd, &mut display, &mut spi, tasks_box, u8_delay);
+}
+}
 
+fn do_draw<A, B, C, D, E, F, G, H, I>(
+    epd: &mut Epd7in5<spi::Master<spi::SPI2, F, G, H, I>, A, B, C, D, E>,
+    display: &mut Display7in5,
+    spi: &mut spi::Master<spi::SPI2, F, G, H, I>,
+    tasks_box: Box<Mutex<Vec<marvin_api::Task>>>,
+    _u8_delay: E,
+) where
+    A: esp_idf_hal::gpio::OutputPin + embedded_hal::digital::v2::OutputPin,
+    B: esp_idf_hal::gpio::OutputPin + embedded_hal::digital::v2::InputPin,
+    C: esp_idf_hal::gpio::OutputPin
+        + esp_idf_hal::gpio::InputPin
+        + embedded_hal::digital::v2::OutputPin,
+    D: esp_idf_hal::gpio::OutputPin + embedded_hal::digital::v2::OutputPin,
+    E: DelayMs<u8>,
+    F: esp_idf_hal::gpio::OutputPin,
+    G: esp_idf_hal::gpio::OutputPin,
+    H: esp_idf_hal::gpio::OutputPin + esp_idf_hal::gpio::InputPin,
+    I: esp_idf_hal::gpio::OutputPin,
+{
+    display.set_rotation(DisplayRotation::Rotate270);
+
+    loop {
         loop {
-            loop {
-                {
-                    let tasks = tasks_arc.lock().unwrap();
-                    println!("DRAW TASK PTR: {:?}", tasks_ptr);
-                    println!(
-                        "Draw task sees the following tasks ({} total): ",
-                        tasks.len()
-                    );
-
-                    if tasks.len() > 0 {
-                        println!("White clear");
-                        display.clear_bw_buffer(TriColor::White);
-                        epd.update_achromatic_frame(&mut spi, display.bw_buffer())
-                            .unwrap();
-                    }
-
-                    for (i, task) in tasks.iter().enumerate() {
-                        println!("{}", &task.title.as_ref().unwrap());
-                        draw_text(
-                            &mut display,
-                            &task.title.as_ref().unwrap(),
-                            0,
-                            i as i16 * TASK_SPACING,
-                        );
-                    }
-                }
-            }
-
-            #[allow(unreachable_code)]
             {
-                unsafe {
-                    esp_idf_sys::vTaskDelay(100);
-                }
-
-                println!("White clear");
-                display.clear_bw_buffer(TriColor::White);
-                // manual buffer update for testing
-                /*display.get_mut_buffer();
-                for elem in display.get_mut_buffer().iter_mut() {
-                    *elem = 0xFF;
-                }
-                println!("Updated {} bytes", display.buffer().len());*/
-                /*let mut i = 0;
-                for elem in display.get_mut_buffer().iter_mut() {
-                    match i {
-                        i if i < 24000              => *elem = 0xFF,
-                        i if i < 48000              => *elem = 0x00,
-                        i if i > 48000 && i < 60000 => *elem = 0xFF,
-                        i if i > 72000 && i < 84000 => *elem = 0xFF,
-                        _                           => *elem = 0x00
-                    }
-                    i = i + 1;
-                }*/
-                //epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
-                epd.update_achromatic_frame(&mut spi, display.bw_buffer())
-                    .unwrap();
-
-                display.clear_chromatic_buffer(TriColor::White);
-                epd.update_chromatic_frame(&mut spi, display.bw_buffer())
-                    .unwrap();
-
-                epd.display_frame(&mut spi, &mut u8_delay).unwrap();
-
-                unsafe {
-                    esp_idf_sys::vTaskDelay(1500);
-                }
-
-                println!("Black clear");
-                display.clear_bw_buffer(TriColor::Black);
-                display.get_mut_buffer();
-
-                // r/w frame already empty
-                epd.update_achromatic_frame(&mut spi, display.bw_buffer())
-                    .unwrap();
-                epd.display_frame(&mut spi, &mut u8_delay).unwrap();
-
-                unsafe {
-                    esp_idf_sys::vTaskDelay(1000);
-                }
-
-                println!("Red clear");
-                // set b/w frame to white. NOTE: not needed; red is highest priority
-                //display.clear_buffer(TriColor::White);
-                //epd.update_achromatic_frame(&mut spi, display.bw_buffer());
-                /*let mut i = 0;
-                for elem in display.get_mut_buffer().iter_mut() {
-                    match i {
-                        i if i < 48000 => *elem = 0x00,
-                        _              => *elem = 0xFF
-                    }
-                    i = i + 1;
-                }*/
-                display.clear_chromatic_buffer(TriColor::Chromatic);
-                epd.update_chromatic_frame(&mut spi, display.chromatic_buffer())
-                    .unwrap();
-                epd.display_frame(&mut spi, &mut u8_delay).unwrap();
-
-                unsafe {
-                    esp_idf_sys::vTaskDelay(1000);
-                }
-
-                draw_text(&mut display, "Hello, world", 00, 20);
-                draw_text(&mut display, "from Rust running on", 0, 40);
-                draw_text(
-                    &mut display,
-                    "my ESP32 connected to a 7in5 V3 WaveShare display",
-                    0,
-                    60,
-                );
-                draw_text(
-                    &mut display,
-                    "This is mostly working, but the colors are wrong",
-                    0,
-                    80,
+                let tasks = tasks_box.lock().unwrap();
+                println!(
+                    "Draw task sees the following tasks ({} total): ",
+                    tasks.len()
                 );
 
-                unsafe {
-                    esp_idf_sys::vTaskDelay(1);
+                if tasks.len() > 0 {
+                    println!("White clear");
+                    display.clear_bw_buffer(TriColor::White);
+                    epd.update_achromatic_frame(spi, display.bw_buffer())
+                        .unwrap();
                 }
 
-                // Transfer the frame data to the epd and display it
-                epd.update_achromatic_frame(&mut spi, &display.bw_buffer())
-                    .unwrap();
-                match epd.display_frame(&mut spi, &mut u8_delay) {
-                    Ok(_) => println!("Update frame ok"),
-                    Err(_) => println!("Update frame fail"),
+                for (i, task) in tasks.iter().enumerate() {
+                    println!("{}", &task.title.as_ref().unwrap());
+                    draw_text(
+                        display,
+                        &task.title.as_ref().unwrap(),
+                        0,
+                        i as i16 * TASK_SPACING,
+                    );
                 }
-                println!("Tried to display");
-
-                //loop {
-                unsafe {
-                    esp_idf_sys::vTaskDelay(1000);
-                }
-                //}
             }
+        }
+
+        #[allow(unreachable_code)]
+        {
+            unsafe {
+                esp_idf_sys::vTaskDelay(100);
+            }
+
+            println!("White clear");
+            display.clear_bw_buffer(TriColor::White);
+            // manual buffer update for testing
+            /*display.get_mut_buffer();
+            for elem in display.get_mut_buffer().iter_mut() {
+                *elem = 0xFF;
+            }
+            println!("Updated {} bytes", display.buffer().len());*/
+            /*let mut i = 0;
+            for elem in display.get_mut_buffer().iter_mut() {
+                match i {
+                    i if i < 24000              => *elem = 0xFF,
+                    i if i < 48000              => *elem = 0x00,
+                    i if i > 48000 && i < 60000 => *elem = 0xFF,
+                    i if i > 72000 && i < 84000 => *elem = 0xFF,
+                    _                           => *elem = 0x00
+                }
+                i = i + 1;
+            }*/
+            //epd.update_color_frame(&mut spi, display.bw_buffer(), display.chromatic_buffer());
+            epd.update_achromatic_frame(&mut spi, display.bw_buffer())
+                .unwrap();
+
+            display.clear_chromatic_buffer(TriColor::White);
+            epd.update_chromatic_frame(&mut spi, display.bw_buffer())
+                .unwrap();
+
+            epd.display_frame(&mut spi, &mut _u8_delay).unwrap();
+
+            unsafe {
+                esp_idf_sys::vTaskDelay(1500);
+            }
+
+            println!("Black clear");
+            display.clear_bw_buffer(TriColor::Black);
+            display.get_mut_buffer();
+
+            // r/w frame already empty
+            epd.update_achromatic_frame(&mut spi, display.bw_buffer())
+                .unwrap();
+            epd.display_frame(&mut spi, &mut _u8_delay).unwrap();
+
+            unsafe {
+                esp_idf_sys::vTaskDelay(1000);
+            }
+
+            println!("Red clear");
+            // set b/w frame to white. NOTE: not needed; red is highest priority
+            //display.clear_buffer(TriColor::White);
+            //epd.update_achromatic_frame(&mut spi, display.bw_buffer());
+            /*let mut i = 0;
+            for elem in display.get_mut_buffer().iter_mut() {
+                match i {
+                    i if i < 48000 => *elem = 0x00,
+                    _              => *elem = 0xFF
+                }
+                i = i + 1;
+            }*/
+            display.clear_chromatic_buffer(TriColor::Chromatic);
+            epd.update_chromatic_frame(&mut spi, display.chromatic_buffer())
+                .unwrap();
+            epd.display_frame(&mut spi, &mut _u8_delay).unwrap();
+
+            unsafe {
+                esp_idf_sys::vTaskDelay(1000);
+            }
+
+            draw_text(&mut display, "Hello, world", 00, 20);
+            draw_text(&mut display, "from Rust running on", 0, 40);
+            draw_text(
+                &mut display,
+                "my ESP32 connected to a 7in5 V3 WaveShare display",
+                0,
+                60,
+            );
+            draw_text(
+                &mut display,
+                "This is mostly working, but the colors are wrong",
+                0,
+                80,
+            );
+
+            unsafe {
+                esp_idf_sys::vTaskDelay(1);
+            }
+
+            // Transfer the frame data to the epd and display it
+            epd.update_achromatic_frame(&mut spi, &display.bw_buffer())
+                .unwrap();
+            match epd.display_frame(&mut spi, &mut _u8_delay) {
+                Ok(_) => println!("Update frame ok"),
+                Err(_) => println!("Update frame fail"),
+            }
+            println!("Tried to display");
+
+            //loop {
+            unsafe {
+                esp_idf_sys::vTaskDelay(1000);
+            }
+            //}
         }
     }
 }
@@ -540,7 +558,7 @@ fn init_wifi() -> Result<Box<EspWifi>, Error> {
     wifi
 }
 
-fn update_marvin_tasks(tasks_arc: &Mutex<Vec<marvin_api::Task>>) {
+fn update_marvin_tasks(tasks_box: &Mutex<Vec<marvin_api::Task>>) {
     println!("LOOP");
     let res = marvin_api::get_todos_for_today(
         FULL_API_KEY,
@@ -550,7 +568,7 @@ fn update_marvin_tasks(tasks_arc: &Mutex<Vec<marvin_api::Task>>) {
     );
 
     {
-        let mut tasks = tasks_arc.lock().unwrap();
+        let mut tasks = tasks_box.lock().unwrap();
 
         tasks.clear();
 
