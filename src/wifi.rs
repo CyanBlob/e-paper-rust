@@ -185,9 +185,6 @@ fn init_wifi() -> Result<Box<EspWifi>, Error> {
 fn update_marvin_tasks(tasks_box: &Mutex<Vec<Task>>) {
     let res = get_todos_for_today(
         FULL_API_KEY,
-        "todayItems",
-        QueryType::GET,
-        Option::None,
     );
 
     {

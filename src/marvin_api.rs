@@ -5,7 +5,6 @@ use embedded_svc::http::*;
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
 
-
 pub enum QueryType {
     GET,
     POST,
@@ -81,16 +80,64 @@ fn print_memory() {
 
 pub fn get_todos_for_today(
     token: &str,
-    endpoint: &str,
-    _query_type: QueryType,
-    _form_args: Option<Box<[(&str, &str)]>>,
     //) -> Result<ApiResult, serde_json::Error> {
 ) -> Result<Vec<Task>, Box<dyn std::error::Error>> {
     use embedded_svc::http::{self, client::*, status, Headers, Status};
     use embedded_svc::io::Bytes;
     use esp_idf_svc::http::client::*;
 
-    let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", endpoint);
+    let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", "todayItems");
+
+    println!("About to fetch content from {}", url);
+
+    let body = minreq::get(&url)
+        .with_header("X-Full-Access-Token", token.to_owned())
+        .send()?;
+
+
+    println!("Parsed body");
+
+    let body_str = String::from_utf8_lossy(&body.as_bytes()).into_owned();
+
+    println!("Body (raw):\n{:?}", body_str);
+
+    let api_result: Result<Vec<Task>, serde_json::Error> = serde_json::from_str(&body_str);
+
+    match api_result {
+        Ok(result) => {
+            println!("Tasks:");
+
+            for task in &result {
+                println!("{}", &task.title.as_ref().unwrap());
+            }
+
+            print_memory();
+
+            Ok(result)
+        }
+        Err(_) => {
+            println!("Failed to parse API response");
+            println!("Adding fake data");
+            let mut fake_results: Vec<Task> = Vec::<Task>::new();
+            fake_results.push(Task {
+                title: Some("FAKE TASK".into()),
+                createdAt: Some(serde_json::Number::from_f64(696969.0).unwrap()),
+                ..Default::default()
+            });
+            Ok(fake_results)
+            //Err("Failed to parse API response".into())
+        }
+    }
+}
+
+pub fn update_todo(
+    token: &str,
+) -> Result<Vec<Task>, Box<dyn std::error::Error>> {
+    use embedded_svc::http::{self, client::*, status, Headers, Status};
+    use embedded_svc::io::Bytes;
+    use esp_idf_svc::http::client::*;
+
+    let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", "doc/update");
 
     println!("About to fetch content from {}", url);
     let mut client = EspHttpClient::new(&EspHttpClientConfiguration {
@@ -100,7 +147,16 @@ pub fn get_todos_for_today(
 
     println!("Created client!");
 
-    let mut request: esp_idf_svc::http::client::EspHttpRequest = client.get(&url)?;
+    /*{
+      "itemId": "xy12n3i123",
+      "setters": [
+        { "key": "done", "val": true },
+        { "key": "fieldUpdates.done", "val": 1648122403647 },
+        { "key": "updatedAt", "val": 1648122403647 }
+      ]
+    } */
+
+    let mut request: esp_idf_svc::http::client::EspHttpRequest = client.post(&url)?;
     request.set_header("X-Full-Access-Token", token);
 
     let response = request.submit()?;
@@ -147,6 +203,4 @@ pub fn get_todos_for_today(
             //Err("Failed to parse API response".into())
         }
     }
-
-    //println!("Body (raw):\n{:?}", body_str);
 }

@@ -103,6 +103,6 @@ impl embedded_hal::blocking::delay::DelayMs<u8> for U8Delay {
 }
 
 #[allow(unused)]
-fn print_type_of<T>(_: &T) {
+pub fn print_type_of<T>(_: &T) {
     println!("{}", std::any::type_name::<T>())
 }
