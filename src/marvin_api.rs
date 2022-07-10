@@ -21,7 +21,7 @@ pub enum ApiResult {
     Tasks(Vec<Task>),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 #[allow(non_snake_case)]
 pub struct Task {
     pub _id: String,
@@ -41,7 +41,7 @@ pub struct Task {
     pub workedOnAt: Option<serde_json::Number>,
     pub fieldUpdates: Option<FieldUpdates>,
 }
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 #[allow(non_snake_case)]
 pub struct FieldUpdates {
     pub dueDate: Option<serde_json::Number>,
@@ -55,11 +55,33 @@ pub struct FieldUpdates {
     pub workedOnAt: Option<serde_json::Number>,
 }
 
-/*impl Task() {
-    fn new() {
-
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.title.as_ref().unwrap().eq(other.title.as_ref().unwrap())
     }
-}*/
+}
+
+impl Eq for Task {}
+
+impl Clone for Task {
+    fn clone(&self) -> Self {
+        return Task {_id: self._id.to_owned(), title: self.title.to_owned(), ..Default::default()};
+    }
+}
+
+impl PartialEq for FieldUpdates {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for FieldUpdates {}
+
+impl Clone for FieldUpdates {
+    fn clone(&self) -> Self {
+        return FieldUpdates {..Default::default()};
+    }
+}
 
 fn print_memory() {
     unsafe {

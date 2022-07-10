@@ -150,6 +150,8 @@ pub fn do_draw<A, B, C, D, E, F, G, H, I>(
             .unwrap();
         epd.display_frame(spi, u8_delay).unwrap();
 
+        let mut old_tasks: Vec<Task> = Vec::new();
+
         loop {
             let tasks = tasks_box.lock().unwrap();
             println!(
@@ -157,6 +159,13 @@ pub fn do_draw<A, B, C, D, E, F, G, H, I>(
                 tasks.len()
             );
 
+            if tasks.iter().eq(old_tasks.iter()) {
+                drop(tasks);
+                unsafe {
+                    esp_idf_sys::vTaskDelay(1000);
+                }
+                continue;
+            }
             display.clear_bw_buffer(TriColor::White);
             for (i, task) in tasks.iter().enumerate() {
                 println!("{}", &task.title.as_ref().unwrap());
@@ -167,18 +176,12 @@ pub fn do_draw<A, B, C, D, E, F, G, H, I>(
                     i as i16 * TASK_SPACING,
                 );
             }
-            if (tasks.len() > 0) {
-                epd.update_achromatic_frame(spi, display.bw_buffer())
-                    .unwrap();
-                println!("\nDisplaying frame!\n");
-                epd.display_frame(spi, u8_delay).unwrap();
-            }
-            if tasks.len() > 0 {
-                loop {}
-            }
-            unsafe {
-                esp_idf_sys::vTaskDelay(500);
-            }
+            epd.update_achromatic_frame(spi, display.bw_buffer())
+                .unwrap();
+            println!("\nDisplaying frame!\n");
+            epd.display_frame(spi, u8_delay).unwrap();
+
+            old_tasks = tasks.clone();
         }
     }
 }
