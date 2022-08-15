@@ -5,6 +5,8 @@ use embedded_svc::http::*;
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
 
+use std::collections::HashMap;
+
 pub enum QueryType {
     GET,
     POST,
@@ -40,6 +42,7 @@ pub struct Task {
     pub firstScheduled: Option<String>,
     pub workedOnAt: Option<serde_json::Number>,
     pub fieldUpdates: Option<FieldUpdates>,
+    pub category: Option<String>
 }
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[allow(non_snake_case)]
@@ -55,6 +58,13 @@ pub struct FieldUpdates {
     pub workedOnAt: Option<serde_json::Number>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[allow(non_snake_case)]
+pub struct Category {
+    pub _id: Option<String>,
+    pub title: Option<String>
+}
+
 impl PartialEq for Task {
     fn eq(&self, other: &Self) -> bool {
         self.title.as_ref().unwrap().eq(other.title.as_ref().unwrap())
@@ -65,7 +75,7 @@ impl Eq for Task {}
 
 impl Clone for Task {
     fn clone(&self) -> Self {
-        return Task {_id: self._id.to_owned(), title: self.title.to_owned(), ..Default::default()};
+        return Task {_id: self._id.to_owned(), title: self.title.to_owned(), category: self.category.to_owned(), ..Default::default()};
     }
 }
 
@@ -108,6 +118,8 @@ pub fn get_todos_for_today(
     use embedded_svc::io::Bytes;
     use esp_idf_svc::http::client::*;
 
+    let categories = get_categories(token);
+
     let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", "todayItems");
 
     println!("About to fetch content from {}", url);
@@ -121,16 +133,16 @@ pub fn get_todos_for_today(
 
     let body_str = String::from_utf8_lossy(&body.as_bytes()).into_owned();
 
-    println!("Body (raw):\n{:?}", body_str);
-
     let api_result: Result<Vec<Task>, serde_json::Error> = serde_json::from_str(&body_str);
 
     match api_result {
-        Ok(result) => {
+        Ok(mut result) => {
             println!("Tasks:");
 
-            for task in &result {
+            for task in &mut result {
                 println!("{}", &task.title.as_ref().unwrap());
+                task.category = Some(categories.as_ref().unwrap().get(task.parentId.as_ref().unwrap()).unwrap().to_owned());
+                //task.category = Some("Test".into());
             }
 
             print_memory();
@@ -195,8 +207,6 @@ pub fn update_todo(
 
     let body_str = String::from_utf8_lossy(&body).into_owned();
 
-    println!("Body (raw):\n{:?}", body_str);
-
     let api_result: Result<Vec<Task>, serde_json::Error> = serde_json::from_str(&body_str);
 
     //let unwrapped_result = api_result.unwrap();
@@ -222,6 +232,65 @@ pub fn update_todo(
                 ..Default::default()
             });
             Ok(fake_results)
+            //Err("Failed to parse API response".into())
+        }
+    }
+}
+
+pub fn get_categories(
+    token: &str,
+) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    use embedded_svc::http::{self, client::*, status, Headers, Status};
+    use embedded_svc::io::Bytes;
+    use esp_idf_svc::http::client::*;
+
+    let url: String = format!("{}/{}", "http://serv.amazingmarvin.com/api", "categories");
+
+    println!("About to fetch categories from {}", url);
+    let mut client = EspHttpClient::new(&EspHttpClientConfiguration {
+        ..Default::default()
+    })?;
+
+    println!("Created client!");
+
+    let mut request: esp_idf_svc::http::client::EspHttpRequest = client.get(&url)?;
+    request.set_header("X-Full-Access-Token", token);
+
+    let response = request.submit()?;
+
+    print_memory();
+
+    println!("Sent request");
+
+    let body: Result<Vec<u8>, _> = Bytes::<_, 64>::new(response.reader()).collect();
+
+    println!("Parsed body");
+
+    let body = body?;
+
+    let body_str = String::from_utf8_lossy(&body).into_owned();
+
+    let api_result: Result<Vec<Category>, serde_json::Error> = serde_json::from_str(&body_str);
+
+    match api_result {
+        Ok(result) => {
+            println!("Categories:");
+            for category in &result {
+                println!("{}", &category.title.as_ref().unwrap());
+            }
+            
+            let mut hash_map = HashMap::new();
+            
+            for category in &result {
+                hash_map.insert(category._id.as_ref().unwrap().clone(), category.title.as_ref().unwrap().clone());
+            }
+            hash_map.insert("unassigned".to_owned(), "unassigned".to_owned());
+
+            Ok(hash_map)
+        }
+        Err(_) => {
+            println!("Failed to parse API response");
+            Err("Failed to fetch categories".into())
             //Err("Failed to parse API response".into())
         }
     }

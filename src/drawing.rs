@@ -169,9 +169,10 @@ pub fn do_draw<A, B, C, D, E, F, G, H, I>(
             display.clear_bw_buffer(TriColor::White);
             for (i, task) in tasks.iter().enumerate() {
                 println!("{}", &task.title.as_ref().unwrap());
+                println!("{}", &task.category.as_ref().unwrap());
                 draw_text(
                     display,
-                    &task.title.as_ref().unwrap(),
+                    &format!("{}: {}", &(&task.category.as_ref().unwrap()), &task.title.as_ref().unwrap()),
                     0,
                     i as i16 * TASK_SPACING,
                 );

@@ -37,12 +37,13 @@ use embedded_svc::timer::TimerService;
 use embedded_svc::timer::*;
 use embedded_svc::wifi::*;
 
-use log::*;
 use anyhow::bail;
+use log::*;
 
-use crate::marvin_api::Task;
+use crate::marvin_api::get_categories;
 use crate::marvin_api::get_todos_for_today;
 use crate::marvin_api::QueryType;
+use crate::marvin_api::Task;
 
 #[allow(dead_code)]
 #[cfg(not(feature = "qemu"))]
@@ -183,10 +184,7 @@ fn init_wifi() -> Result<Box<EspWifi>, Error> {
 }
 
 fn update_marvin_tasks(tasks_box: &Mutex<Vec<Task>>) {
-    let res = get_todos_for_today(
-        FULL_API_KEY,
-    );
-
+    let res = get_todos_for_today(FULL_API_KEY);
     {
         let mut tasks = tasks_box.lock().unwrap();
 
@@ -196,11 +194,7 @@ fn update_marvin_tasks(tasks_box: &Mutex<Vec<Task>>) {
 
         println!("PUSHING TASKS");
         for i in 0..res.len() {
-            println!("PUSHING: {}", &res[i].title.as_ref().unwrap());
             tasks.push(res[i].clone());
         }
-
-        println!("LOOP RES: {:?}", res);
     }
 }
-
