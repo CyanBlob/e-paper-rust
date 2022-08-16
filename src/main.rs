@@ -71,6 +71,7 @@ fn main() -> Result<(), EspError> {
     let created_task: *mut esp_idf_sys::TaskHandle_t =
         &mut test_handle as *mut _ as *mut esp_idf_sys::TaskHandle_t;
 
+    // TODO: have wifi task use vTaskResume and draw task use vTaskSuspend
     // this task runs on core 0 and writes to the display
     unsafe {
         esp_idf_sys::xTaskCreatePinnedToCore(
